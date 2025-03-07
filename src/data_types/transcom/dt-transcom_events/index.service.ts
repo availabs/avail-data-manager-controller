@@ -56,7 +56,7 @@ export default {
           },
         };
 
-        const options = { retryLimit: 1, expireInHours: 10 };
+        const options = { retryLimit: 0, expireInHours: 10 };
 
         const etl_context_id = await dama_tasks.queueDamaTask(
           dama_task_descr,
@@ -88,7 +88,7 @@ export default {
           },
         };
 
-        const options = { retryLimit: 1, expireInHours: 10 };
+        const options = { retryLimit: 0, expireInHours: 10 };
 
         await dama_tasks.scheduleDamaTask(dama_task_descr, options);
 

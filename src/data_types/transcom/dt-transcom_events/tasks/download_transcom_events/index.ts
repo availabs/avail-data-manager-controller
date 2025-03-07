@@ -54,27 +54,20 @@ export function createNewEventsWriteStream(etl_work_dir: string) {
 
 export async function downloadRawTranscomEventsExpanded(
   transcom_event_ids: string[],
-  jwt: string
+  fetch_options: any
 ): Promise<RawTranscomEventExpanded[]> {
   if (transcom_event_ids.length === 0) {
     return [];
   }
 
-  const options = {
-    headers: {
-      "Content-Type": "application/json",
-      authenticationtoken: `Bearer ${jwt}`,
-    },
-  };
+  const reqUrl = `${url}?id=${transcom_event_ids.join("&id=")}&m=${Math.random()}`;
 
-  const reqUrl = `${url}?id=${transcom_event_ids.join("&id=")}`;
-
-  const response = await fetch(reqUrl, options);
+  const response = await fetch(reqUrl, fetch_options);
 
   // @ts-ignore
   const { data } = await response.json();
 
-  logger.silly(JSON.stringify({ data }, null, 4));
+  // logger.silly(JSON.stringify({ data }, null, 4));
 
   return data;
 }
@@ -101,8 +94,21 @@ export async function* makeRawTranscomEventsExpandedIteratorFromTranscomAPI(
   `);
 
   const tokenCollector = new TranscomAuthTokenCollector();
+  let authenticationtoken = await tokenCollector.getJWT();
 
   let mustSleep = false;
+
+  const required_historical_event_cookies = [
+    'JSESSIONID',
+    'XSRF-Cookie',
+    'Anti-Forgery-Cookie'
+  ]
+
+  while (
+    ! required_historical_event_cookies.every(name => tokenCollector.historicalEventSearchCookies?.[name])
+  ) {
+    await sleep(1000)
+  }
 
   while (true) {
     const batch = select_batch_ids_stmt.pluck().all();
@@ -118,11 +124,73 @@ export async function* makeRawTranscomEventsExpandedIteratorFromTranscomAPI(
       mustSleep = false;
     }
 
-    const jwt = await tokenCollector.getJWT();
+    while (
+      ! required_historical_event_cookies.every(name => tokenCollector.historicalEventSearchCookies?.[name])
+    ) {
+      await sleep(1000)
+    }
+
+    const cookies = await tokenCollector.getCookies();
+
+    const jsessionid_cookie = tokenCollector.historicalEventSearchCookies['JSESSIONID']
+    const xsrf_cookie = tokenCollector.historicalEventSearchCookies['XSRF-Cookie']
+    const anti_forgery_cookie = tokenCollector.historicalEventSearchCookies['Anti-Forgery-Cookie']
+
+    const names = [
+        '_ga',
+        'sso_displayName',
+        'sso_orgName',
+        'sso_token',
+        'sso_orgLogo',
+        'sso_orgSiteUrl',
+        'sso_rightorgLogo',
+        'sso_rightorgSiteUrl',
+        'sso_FooterData',
+        '_ga_6YYDNHMN43',
+        'sso_jwtToken',
+        '_ga_H5QEG6G104',
+    ]
+
+    const cookies_str = [
+      `JSESSIONID=${jsessionid_cookie}`,
+      `${names.map(n => `${n}=${cookies[n]}`).join('; ')}`,
+      `XSRF-Cookie=${xsrf_cookie}`,
+      `Anti-Forgery-Cookie=${anti_forgery_cookie}`
+    ].join('; ');
+
+    // FIXME: Need to refresh JWT because, in current implementation, TranscomAuthTokenCollector.getJWT creates the page.
+    //        Then we need to wait for navigation to HistoricalEventSearch and collection of necessary cookies.
+    //        By the time that's done, JWT may be stale.
+    authenticationtoken = await tokenCollector.getJWT();
+
+    const headers = {
+      "accept": "application/json, text/plain, */*",
+      "accept-language": "en-US,en;q=0.9",
+      "authenticationtoken": `Bearer ${authenticationtoken}`,
+      "content-type": "application/json",
+      "priority": "u=1, i",
+      "sec-ch-ua": "\"Google Chrome\";v=\"129\", \"Not=A?Brand\";v=\"8\", \"Chromium\";v=\"129\"",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": "\"Linux\"",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin",
+      "x-xsrf-token": xsrf_cookie,
+      "cookie": `${cookies_str};`,
+      "Referer": "https://eventsearch.xcmdata.org/HistoricalEventSearch/?appId=88",
+      "Referrer-Policy": "strict-origin-when-cross-origin"
+    }
+
+    const options = {
+      method: "GET",
+      headers: headers,
+      mode: "cors",
+      credentials: "include",
+    };
 
     const eventsExpandedData = await downloadRawTranscomEventsExpanded(
       batch,
-      jwt
+      options
     );
 
     mustSleep = true;

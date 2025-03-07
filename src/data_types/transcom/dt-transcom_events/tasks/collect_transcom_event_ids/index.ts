@@ -1,3 +1,5 @@
+import { inspect } from "util";
+
 import fetch from "node-fetch";
 import { Database as SQLiteDB } from "better-sqlite3";
 import _ from "lodash";
@@ -6,6 +8,8 @@ import dama_events from "data_manager/events";
 import logger from "data_manager/logger";
 
 import { verifyIsInTaskEtlContext } from "data_manager/contexts";
+
+import { sleep } from "data_utils/time";
 
 import {
   getTranscomRequestFormattedTimestamp,
@@ -84,37 +88,103 @@ export async function* makeRawTranscomEventIterator(
 
     logger.silly(`reqBody=${JSON.stringify(reqBody, null, 4)}`);
 
-    const authenticationtoken = await tokenCollector.getJWT();
+    let authenticationtoken = await tokenCollector.getJWT();
 
-    logger.silly(`authenticationtoken: ${authenticationtoken}`);
+    const cookies = await tokenCollector.getCookies();
+
+    const required_historical_event_cookies = [
+      'JSESSIONID',
+      'XSRF-Cookie',
+      'Anti-Forgery-Cookie'
+    ]
+
+    while (
+      ! required_historical_event_cookies.every(name => tokenCollector.historicalEventSearchCookies?.[name])
+    ) {
+      await sleep(1000)
+    }
+
+    const jsessionid_cookie = tokenCollector.historicalEventSearchCookies['JSESSIONID']
+    const xsrf_cookie = tokenCollector.historicalEventSearchCookies['XSRF-Cookie']
+    const anti_forgery_cookie = tokenCollector.historicalEventSearchCookies['Anti-Forgery-Cookie']
+
+    const names = [
+        '_ga',
+        'sso_displayName',
+        'sso_orgName',
+        'sso_token',
+        'sso_orgLogo',
+        'sso_orgSiteUrl',
+        'sso_rightorgLogo',
+        'sso_rightorgSiteUrl',
+        'sso_FooterData',
+        '_ga_6YYDNHMN43',
+        'sso_jwtToken',
+        '_ga_H5QEG6G104',
+    ]
+
+    const cookies_str = [
+      `JSESSIONID=${jsessionid_cookie}`,
+      `${names.map(n => `${n}=${cookies[n]}`).join('; ')}`,
+      `XSRF-Cookie=${xsrf_cookie}`,
+      `Anti-Forgery-Cookie=${anti_forgery_cookie}`
+    ].join('; ');
+
+    // FIXME: Need to refresh JWT because, in current implementation, TranscomAuthTokenCollector.getJWT creates the page.
+    //        Then we need to wait for navigation to HistoricalEventSearch and collection of necessary cookies.
+    //        By the time that's done, JWT may be stale.
+    authenticationtoken = await tokenCollector.getJWT();
+
+    const headers = {
+      "accept": "application/json, text/plain, */*",
+      "accept-language": "en-US,en;q=0.9",
+      "authenticationtoken": `Bearer ${authenticationtoken}`,
+      "content-type": "application/json",
+      "priority": "u=1, i",
+      "sec-ch-ua": "\"Google Chrome\";v=\"129\", \"Not=A?Brand\";v=\"8\", \"Chromium\";v=\"129\"",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": "\"Linux\"",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin",
+      "x-xsrf-token": xsrf_cookie,
+      "cookie": `${cookies_str};`,
+      "Referer": "https://eventsearch.xcmdata.org/HistoricalEventSearch/?appId=88",
+      "Referrer-Policy": "strict-origin-when-cross-origin"
+    }
 
     const options = {
       method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-        authenticationtoken: `Bearer ${authenticationtoken}`,
-      },
-
+      headers: headers,
+      mode: "cors",
+      credentials: "include",
       body: JSON.stringify(reqBody),
     };
 
-    logger.debug("makeRawTranscomEventIterator sending request");
+    const res = await fetch(
+      `https://eventsearch.xcmdata.org/HistoricalEventSearch/xcmEvent/getEventGridData?m=${Math.random()}`,
+      options
+    )
 
-    const response = await fetch(`${url}?userId=78`, options);
+    const res_text = await res.text()
 
     must_sleep = true;
 
-    logger.debug("makeRawTranscomEventIterator got response");
+    try {
+      const { data: events } = JSON.parse(res_text)
 
-    const { data: events } = await response.json();
+      logger.debug(`makeRawTranscomEventIterator got ${events?.length} events`);
 
-    logger.debug(`makeRawTranscomEventIterator got ${events?.length} events`);
-
-    if (Array.isArray(events)) {
-      for (const event of events) {
-        yield event;
+      if (Array.isArray(events)) {
+        for (const event of events) {
+          yield event;
+        }
       }
+
+    } catch(err) {
+      logger.error(res_text);
+      logger.error(inspect(response, { depth: null }));
+      throw err
     }
   }
 

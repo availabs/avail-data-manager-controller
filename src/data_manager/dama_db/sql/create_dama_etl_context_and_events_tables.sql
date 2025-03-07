@@ -149,6 +149,11 @@ CREATE OR REPLACE FUNCTION data_manager.event_store_etl_context_status_update_fn
             WHERE ( etl_context_id = NEW.etl_context_id )
           ;
 
+          PERFORM pg_notify(
+            'ETL_CONTEXT_ERROR_EVENT',
+            NEW.etl_context_id::TEXT
+          ) ;
+
           RETURN NULL ;
       END IF ;
 
