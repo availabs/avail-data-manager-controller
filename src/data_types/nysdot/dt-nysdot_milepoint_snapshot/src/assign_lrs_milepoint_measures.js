@@ -37,8 +37,14 @@ require('dotenv').config({ path: join(__dirname, '../../../../../config/postgres
 
 const lrs_aux_tables = require('./lrs_aux_tables.json').sort()
 
-const SOURCE_DATA_SCHEMA = 'nysdot_milepoint_2020'
-const ETL_WORK_SCHEMA = 'nysdot_milepoint_2020_etl'
+const { AVAIL_DATA_YEAR } = process.env
+
+if (!AVAIL_DATA_YEAR) {
+  throw new Error('AVAIL_DATA_YEAR is a required ENV variable.')
+}
+
+const SOURCE_DATA_SCHEMA = `nysdot_milepoint_${AVAIL_DATA_YEAR}`
+const ETL_WORK_SCHEMA = `${SOURCE_DATA_SCHEMA}_etl`
 
 // const SOURCE_DATA_SCHEMA = 'nysdot_milepoint_subset'
 // const ETL_WORK_SCHEMA = 'nysdot_milepoint_subset_etl'
@@ -74,12 +80,84 @@ const etl_step_configs = {
 
 const workflow = [
   'clean',
+  fixSchemas,
   'createLRSMilepointLinestringsTable',
   createLrsAuxGeometriesTable,
   'createLRSAuxLinestringsTable',
   'doNonpartitionedMptLinestringsFromToAssignments',
-  'qa',
+  // 'qa',
 ]
+
+async function fixSchemas() {
+  const column_name_renaming = {
+    routeid: 'route_id',
+    frommeasure: 'from_measure',
+    tomeasure: 'to_measure',
+    fromdate: 'from_date',
+    todate: 'to_date'
+  }
+
+  const column_names_requiring_rename = Object.keys(column_name_renaming)
+
+  console.log('createLrsAuxGeometriesTable')
+  const db = new Client()
+
+  try {
+    await db.connect()
+
+    await db.query('BEGIN ;')
+
+    const table_names_sql = `
+      SELECT
+          table_name
+        FROM information_schema.tables
+        WHERE ( table_schema = $1 )
+      ;
+    `
+
+    const { rows: table_names_result } = await db.query(table_names_sql, [SOURCE_DATA_SCHEMA])
+
+    const column_names_to_alter_sql = `
+      SELECT
+          column_name
+        FROM information_schema.columns
+        WHERE (
+          ( table_schema = $1 )
+          AND
+          ( table_name = $2 )
+          AND
+          ( column_name = ANY($3) )
+        )
+    `
+
+    for (const { table_name } of table_names_result) {
+      const { rows: column_names_result } = await db.query(
+        column_names_to_alter_sql,
+        [SOURCE_DATA_SCHEMA, table_name, column_names_requiring_rename]
+      )
+
+      for (const { column_name } of column_names_result) {
+        const rename_column_sql = pgFormat(`
+          ALTER TABLE %I.%I
+            RENAME COLUMN %I TO %I
+          ;
+        `,
+          SOURCE_DATA_SCHEMA,
+          table_name,
+          column_name,
+          column_name_renaming[column_name]
+        )
+
+        await db.query(rename_column_sql)
+      }
+    }
+
+    await db.query('COMMIT ;')
+
+  } finally {
+    await db.end()
+  }
+}
 
 async function createLrsAuxGeometriesTable() {
   console.log('createLrsAuxGeometriesTable')
@@ -139,6 +217,7 @@ async function createLrsAuxGeometriesTable() {
 
     await db.query(create_table_sql)
 
+    // FIXME FIXME FIXME: Make dynamic using system tables.
     for (const lrs_aux_table_name of lrs_aux_tables) {
       console.log(lrs_aux_table_name)
       const has_wkb_geometry_column_sql = `

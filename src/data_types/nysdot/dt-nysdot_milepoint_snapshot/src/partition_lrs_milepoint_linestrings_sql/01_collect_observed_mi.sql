@@ -56,8 +56,14 @@ INSERT INTO :ETL_WORK_SCHEMA.lrs_milepoint_linestrings_observed_milepoints (
     WHERE (
 
       numrange(
-        COALESCE(a.assigned_from_measure::NUMERIC, -1),
-        COALESCE(a.assigned_to_measure::NUMERIC, -1),
+        LEAST(
+          COALESCE(a.assigned_from_measure::NUMERIC, -1),
+          COALESCE(a.assigned_to_measure::NUMERIC, -1)
+        ),
+        GREATEST(
+          COALESCE(a.assigned_from_measure::NUMERIC, -1),
+          COALESCE(a.assigned_to_measure::NUMERIC, -1)
+        ),
         '[)'
       )
       &&

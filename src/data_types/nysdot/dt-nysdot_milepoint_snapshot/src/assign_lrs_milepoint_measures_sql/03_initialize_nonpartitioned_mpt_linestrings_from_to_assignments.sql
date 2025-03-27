@@ -86,8 +86,12 @@ CREATE VIEW :ETL_WORK_SCHEMA.lrs_mpt_lstr_join_aux_lstr_using_route_id
         a.lrs_mpt_lstr_from_mi,
         a.lrs_mpt_lstr_to_mi,
 
+        a.lrs_mpt_lstr_start_pt_calib_pt_measure,
+        a.lrs_mpt_lstr_end_pt_calib_pt_measure,
+
         a.lrs_mpt_geom_mi_exclusive_range,
         a.lrs_mpt_lstr_mi_exclusive_range,
+        a.lrs_mpt_lstr_calib_pt_measure_exclusive_range,
 
         b.lrs_aux_table_name,
         b.lrs_aux_ogc_fid,
@@ -98,7 +102,6 @@ CREATE VIEW :ETL_WORK_SCHEMA.lrs_mpt_lstr_join_aux_lstr_using_route_id
 
         b.lrs_aux_geom_from_measure,
         b.lrs_aux_geom_to_measure,
-
 
         b.lrs_aux_geom_from_mi,
         b.lrs_aux_geom_to_mi,
@@ -111,6 +114,12 @@ CREATE VIEW :ETL_WORK_SCHEMA.lrs_mpt_lstr_join_aux_lstr_using_route_id
         b.lrs_aux_lstr_mi_exclusive_range,
 
         b.from_lt_to_measure AS lrs_aux_from_lt_to_measure,
+
+        (
+          a.lrs_mpt_lstr_mi_exclusive_range
+          &&
+          b.lrs_aux_geom_mi_exclusive_range
+        ) AS lrs_mpt_and_aux_lstr_mi_ranges_overlap,
 
         ST_Equals(
           a.lrs_mpt_geom_start_pt_wkb_geometry,
@@ -163,9 +172,12 @@ CREATE VIEW :ETL_WORK_SCHEMA.lrs_mpt_lstr_join_aux_lstr_using_route_id_props_onl
 
         lrs_mpt_lstr_from_mi,
         lrs_mpt_lstr_to_mi,
+        lrs_mpt_lstr_start_pt_calib_pt_measure,
+        lrs_mpt_lstr_end_pt_calib_pt_measure,
 
         lrs_mpt_geom_mi_exclusive_range,
         lrs_mpt_lstr_mi_exclusive_range,
+        lrs_mpt_lstr_calib_pt_measure_exclusive_range,
 
         lrs_aux_table_name,
         lrs_aux_ogc_fid,

@@ -35,11 +35,14 @@ require('dotenv').config({ path: join(__dirname, '../../../../../config/postgres
 
 const lrs_aux_tables = require('./lrs_aux_tables.json').sort()
 
-const SOURCE_DATA_SCHEMA = 'nysdot_milepoint_2021'
-const ETL_WORK_SCHEMA = 'nysdot_milepoint_2021_etl'
+const { AVAIL_DATA_YEAR } = process.env
 
-// const SOURCE_DATA_SCHEMA = 'nysdot_milepoint_subset'
-// const ETL_WORK_SCHEMA = 'nysdot_milepoint_subset_etl'
+if (!AVAIL_DATA_YEAR) {
+  throw new Error('AVAIL_DATA_YEAR is a required ENV variable.')
+}
+
+const SOURCE_DATA_SCHEMA = `nysdot_milepoint_${AVAIL_DATA_YEAR}`
+const ETL_WORK_SCHEMA = `${SOURCE_DATA_SCHEMA}_etl`
 
 process.env.SOURCE_DATA_SCHEMA = SOURCE_DATA_SCHEMA
 process.env.ETL_WORK_SCHEMA = ETL_WORK_SCHEMA
