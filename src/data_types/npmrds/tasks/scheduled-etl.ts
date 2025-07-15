@@ -281,10 +281,7 @@ export async function doQA() {
 
   const { rows: travel_time_import_view_ids_result } = await dama_db.query({
     text: sql,
-    values: [
-      +getEtlContextId(),
-      NpmrdsDataSources.NpmrdsTravelTimesImports,
-    ],
+    values: [+getEtlContextId(), NpmrdsDataSources.NpmrdsTravelTimesImports],
   });
 
   const view_ids = travel_time_import_view_ids_result.map(

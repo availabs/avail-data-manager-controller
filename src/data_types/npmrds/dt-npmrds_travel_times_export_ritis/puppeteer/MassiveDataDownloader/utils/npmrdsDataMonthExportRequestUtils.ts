@@ -138,7 +138,7 @@ export function getNpmrdsExportRequestDateRange(
 ): DataDateRange {
   const {
     request_url,
-    request_body: { DATERANGES: dateRanges },
+    request_body: { DATE_RANGES: dateRanges },
   } = mddExSubReq;
 
   if (request_url !== EXPORT_REQUEST_URL) {
@@ -167,7 +167,7 @@ export function getNpmrdsExportRequestDateRange(
 
   if (!all_dates_are_in_expected_format) {
     throw new Error(
-      "It appears RITIS changed the timestamp formats in the DATERANGES list."
+      "It appears RITIS changed the timestamp formats in the DATE_RANGES list."
     );
   }
 
@@ -232,7 +232,7 @@ export function getNpmrdsExportRequestDateRange(
 
     if (incremented_s_date_time.toMillis() !== e_date_time.toMillis()) {
       logger.debug(
-        `Throwing "INVARIANT BROKEN: The DATERANGES entries are not 24 hour periods." because ${JSON.stringify(
+        `Throwing "INVARIANT BROKEN: The DATE_RANGES entries are not 24 hour periods." because ${JSON.stringify(
           { s_date_time, e_date_time, incremented_s_date_time },
           null,
           4
@@ -240,7 +240,7 @@ export function getNpmrdsExportRequestDateRange(
       );
 
       throw new Error(
-        "INVARIANT BROKEN: The DATERANGES entries are not 24 hour periods."
+        "INVARIANT BROKEN: The DATE_RANGES entries are not 24 hour periods."
       );
     }
   }
@@ -325,22 +325,22 @@ export function confirmAllDataMeasuresInExportRequest(
 export function confirmTimeUnitsIsSecondsInExportRequest(
   mddExSubReq: MassiveDataDownloaderExportRequest
 ) {
-  const { TRAVELTIMEUNITS } = mddExSubReq.request_body;
+  const { TRAVEL_TIME_UNITS } = mddExSubReq.request_body;
 
   if (
-    TRAVELTIMEUNITS.toLowerCase() !==
+    TRAVEL_TIME_UNITS.toLowerCase() !==
     NpmrdsTravelTimeUnits.seconds.toLowerCase()
   ) {
-    throw new Error("TravelTime units !== seconds: ${TRAVELTIMEUNITS}");
+    throw new Error("TravelTime units !== seconds: ${TRAVEL_TIME_UNITS}");
   }
 }
 
 export function confirmNullsIncludedInExportRequest(
   mddExSubReq: MassiveDataDownloaderExportRequest
 ) {
-  const { ADDNULLRECORDS } = mddExSubReq.request_body;
+  const { ADD_NULL_RECORDS } = mddExSubReq.request_body;
 
-  if (ADDNULLRECORDS !== true) {
+  if (ADD_NULL_RECORDS !== true) {
     throw new Error("NULL records not included.");
   }
 }
@@ -348,9 +348,9 @@ export function confirmNullsIncludedInExportRequest(
 export function confirmNoTravelTimeAveragingInExportRequest(
   mddExSubReq: MassiveDataDownloaderExportRequest
 ) {
-  const { AVERAGINGWINDOWSIZE } = mddExSubReq.request_body;
+  const { AVERAGING_WINDOW_SIZE } = mddExSubReq.request_body;
 
-  if (+AVERAGINGWINDOWSIZE !== 0) {
+  if (+AVERAGING_WINDOW_SIZE !== 0) {
     throw new Error("Export request averaging is on.");
   }
 }
@@ -371,9 +371,9 @@ export function confirmDownloadNameInExportRequest(
 export function confirmNoEmailNotificationInExportRequest(
   mddExSubReq: MassiveDataDownloaderExportRequest
 ) {
-  const { SENDNOTIFICATIONEMAIL } = mddExSubReq.request_body;
+  const { SEND_NOTIFICATION_EMAIL } = mddExSubReq.request_body;
 
-  if (SENDNOTIFICATIONEMAIL !== false) {
+  if (SEND_NOTIFICATION_EMAIL !== false) {
     throw new Error("Email notifications not disabled.");
   }
 }
@@ -438,6 +438,15 @@ export async function validateExportRequest(
       return acc;
     }, "Complete NPMRDS Data Month Export Request validation failed for the following reasons:");
 
+    logger.error(
+      `\n\n\nERROR validateExportRequest ERROR validateExportRequest ERROR validateExportRequest\n
+       ${inspect({ errorMessages, npmrdsDataReq, mddExSubReq }, {
+         depth: null,
+         compact: false,
+         sorted: true,
+       })}\n\n\n`
+    );
+
     return message;
   }
 
@@ -499,7 +508,7 @@ export function catchAllExportRequests(
         logger.silly(
           `npmrdsDataMonthExportRequestUtils startCatchingExportRequests inspecting:
                 tracing_id: ${tracing_id}
-                request_url: ${req.request_url} 
+                request_url: ${req.request_url}
           `
         );
 
@@ -556,7 +565,7 @@ export function catchAllExportRequests(
         logger.silly(
           `npmrdsDataMonthExportRequestUtils startCatchingExportRequests continuing response:
              tracing_id:  ${tracing_id}
-             request_url: ${req.request_url} 
+             request_url: ${req.request_url}
           `
         );
 
