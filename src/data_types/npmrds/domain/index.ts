@@ -375,10 +375,6 @@ export type NpmrdsExportTransformOutput = {
   npmrdsFreightTrucksTravelTimesExport: string;
 
   npmrdsTravelTimesSqliteDb: string;
-
-  npmrdsTravelTimesExportSqlite: string;
-  npmrdsTmcIdentificationCsv: string;
-  npmrdsTravelTimesCsv: string;
 };
 
 export enum TaskQueue {

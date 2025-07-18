@@ -14,15 +14,15 @@ import { ServiceBroker } from "moleculer";
 
 import { runInDamaContext } from "./src/data_manager/contexts";
 
-async function initializeTranscom(broker: ServiceBroker) {
-  await broker.waitForServices(["data_types/dt-transcom_events"]);
-
-  await broker.call("data_types/dt-transcom_events.startTaskQueue");
-  await broker.call("data_types/dt-transcom_events.scheduleTranscomEventsEtl", {
-    cron: "11 1 * * *",
-  });
-  console.log("\n\nINITIALIZED TRANSCOM Services\n\n");
-}
+// async function initializeTranscom(broker: ServiceBroker) {
+//   await broker.waitForServices(["data_types/dt-transcom_events"]);
+//
+//   await broker.call("data_types/dt-transcom_events.startTaskQueue");
+//   await broker.call("data_types/dt-transcom_events.scheduleTranscomEventsEtl", {
+//     cron: "11 1 * * *",
+//   });
+//   console.log("\n\nINITIALIZED TRANSCOM Services\n\n");
+// }
 
 async function initializeNpmrds(broker: ServiceBroker) {
   await broker.waitForServices(["dama/data_types/npmrds"]);
@@ -35,8 +35,8 @@ async function initializeNpmrds(broker: ServiceBroker) {
 export default async function initializeServices(
   broker: ServiceBroker
 ): Promise<void> {
-  await runInDamaContext({ meta: { pgEnv: "npmrds" } }, async () => {
-    await initializeTranscom(broker);
+  await runInDamaContext({ meta: { pgEnv: "dama_dev_1" } }, async () => {
+    // await initializeTranscom(broker);
     await initializeNpmrds(broker);
   });
 }

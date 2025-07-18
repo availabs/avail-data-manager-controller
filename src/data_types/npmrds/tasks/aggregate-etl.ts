@@ -42,18 +42,17 @@ import {
   NpmrdsDataSources,
   NpmrdsTravelTimesExportRitisElements,
   NpmrdsTravelTimesExportEtlElements,
-  NpmrdsExportRequest,
   TaskQueue as NpmrdsTaskQueue,
   NpmrdsExportMetadata,
 } from "../domain";
 
 import {
-  InitialEvent as NpmrdsExportIntitialEvent,
+  IngestInitialEvent as NpmrdsExportInitialEvent,
   FinalEvent as NpmrdsExportFinalEvent,
 } from "../dt-npmrds_travel_times_export_ritis";
 
 import {
-  InitialEvent as LoadTmcIdentificationIntialEvent,
+  InitialEvent as LoadTmcIdentificationInitialEvent,
   FinalEvent as LoadTmcIdentificationFinalEvent,
 } from "../dt-npmrds_tmc_identification_imp";
 
@@ -63,6 +62,10 @@ import {
 } from "../dt-npmrds_travel_times_imp";
 
 import { DamaView } from "data_manager/meta/domain";
+import {
+  IngestInitialEvent,
+  RitisDownloadRequestUuid,
+} from "../dt-npmrds_travel_times_export_ritis/domain";
 
 type EtlDoneData = {
   [NpmrdsDataSources.NpmrdsTravelTimesExportRitis]: {
@@ -93,7 +96,7 @@ type IntegrateDoneData = DamaView[];
 
 export type InitialEvent = {
   type: ":INITIAL";
-  payload: NpmrdsExportRequest;
+  payload: IngestInitialEvent["payload"];
   meta?: object;
 };
 
@@ -130,7 +133,7 @@ const npmrds_travel_times_exports_data_dir = join(
 );
 
 async function downloadAndTransformNpmrdsExport(
-  npmrds_export_request: NpmrdsExportRequest
+  ritis_uuids: RitisDownloadRequestUuid[]
 ): Promise<NpmrdsExportFinalEvent> {
   const subtask_name = "download_and_transform_npmrds_export";
 
@@ -139,9 +142,9 @@ async function downloadAndTransformNpmrdsExport(
     "../dt-npmrds_travel_times_export_ritis/worker.ts"
   );
 
-  const initial_event: NpmrdsExportIntitialEvent = {
+  const initial_event: NpmrdsExportInitialEvent = {
     type: ":INITIAL",
-    payload: npmrds_export_request,
+    payload: { ritis_uuids },
     meta: { note: "download and transform NPMRDS export" },
   };
 
@@ -166,14 +169,14 @@ async function downloadAndTransformNpmrdsExport(
 async function loadTmcIdentification(
   npmrds_export_transform_done_data: NpmrdsExportFinalEvent["payload"]
 ) {
-  const subtask_name = "load_tmc_identifcation";
+  const subtask_name = "load_tmc_identification";
 
   const worker_path = join(
     __dirname,
     "../dt-npmrds_tmc_identification_imp/worker.ts"
   );
 
-  const initial_event: LoadTmcIdentificationIntialEvent = {
+  const initial_event: LoadTmcIdentificationInitialEvent = {
     type: ":INITIAL",
     payload: npmrds_export_transform_done_data,
     meta: { note: "load TMC_Identification" },
@@ -199,7 +202,7 @@ async function loadTmcIdentification(
 
 async function loadNpmrdsTravelTimes(
   npmrds_export_transform_done_data: NpmrdsExportFinalEvent["payload"],
-  load_tmc_identifcation_done_data: LoadTmcIdentificationFinalEvent["payload"]
+  load_tmc_identification_done_data: LoadTmcIdentificationFinalEvent["payload"]
 ) {
   const subtask_name = "load_npmrds_travel_times";
 
@@ -212,7 +215,7 @@ async function loadNpmrdsTravelTimes(
     type: ":INITIAL",
     payload: {
       npmrds_export_transform_done_data,
-      load_tmc_identifcation_done_data,
+      load_tmc_identification_done_data,
     },
     meta: { note: "load NPMRDS travel times" },
   };
@@ -331,7 +334,6 @@ async function linkEtlOutputIntoDamaFilesDir(
   ]);
 
   linkFileIntoDamaFilesDir(getNpmrdsExportMetadataFilePath());
-  linkFileIntoDamaFilesDir(join(getEtlMetadataDir(), "PDA_APP_STORE.json"));
 
   const done_data = {
     [NpmrdsDataSources.NpmrdsTravelTimesExportRitis]: {
@@ -426,7 +428,7 @@ async function integrateNpmrdsTravelTimesEtlIntoDataManager(
         $12,
         $13,
         ( SELECT deps FROM cte_deps )
-      ) 
+      )
         RETURNING *
     ;
   `);
@@ -534,9 +536,7 @@ async function integrateNpmrdsTravelTimesEtlIntoDataManager(
   return done_data;
 }
 
-export default async function main(
-  initial_event: InitialEvent
-): Promise<DoneData> {
+export default async function main(): Promise<DoneData> {
   verifyIsInTaskEtlContext();
 
   logger.info(`==> aggregate-etl.main pid=${process.pid}`);
@@ -549,18 +549,21 @@ export default async function main(
     return final_event.payload;
   }
 
-  const { payload: npmrds_export_request } = initial_event;
+  const [initial_event] = events;
+  const {
+    payload: { ritis_uuids },
+  } = initial_event;
 
   const { payload: download_and_transform_done_data } =
-    await downloadAndTransformNpmrdsExport(npmrds_export_request);
+    await downloadAndTransformNpmrdsExport(ritis_uuids);
 
-  const { payload: load_tmc_identifcation_done_data } =
+  const { payload: load_tmc_identification_done_data } =
     await loadTmcIdentification(download_and_transform_done_data);
 
   const { payload: load_npmrds_travel_times_done_data } =
     await loadNpmrdsTravelTimes(
       download_and_transform_done_data,
-      load_tmc_identifcation_done_data
+      load_tmc_identification_done_data
     );
 
   const etl_output_into_dama_files_done_data =
@@ -570,7 +573,7 @@ export default async function main(
     ...etl_output_into_dama_files_done_data,
 
     [NpmrdsDataSources.NpmrdsTmcIdentificationImports]:
-      load_tmc_identifcation_done_data,
+      load_tmc_identification_done_data,
 
     [NpmrdsDataSources.NpmrdsTravelTimesImports]:
       load_npmrds_travel_times_done_data,

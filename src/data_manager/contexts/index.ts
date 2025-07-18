@@ -174,6 +174,14 @@ export const runInDamaContext = (store: EtlContext, fn: () => unknown) => {
   return dama_context_async_local_storage.run(store, fn);
 };
 
+export const runInTransactionContext = (pgEnv: PgEnv, fn: () => unknown) => {
+  const store: EtlContext = {
+    meta: { pgEnv },
+  };
+
+  return runInDamaContext(store, fn);
+};
+
 /*
 // NOTE: Can use getContext to get the parent_context.
 export const runInDamaContext = (store: EtlContext, fn: () => unknown) => {

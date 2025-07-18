@@ -15,7 +15,7 @@ export type InitialEvent = {
   type: ":INITIAL";
   payload: {
     npmrds_export_transform_done_data: NpmrdsExportFinalEvent["payload"];
-    load_tmc_identifcation_done_data: LoadTmcIdentificationFinalEvent["payload"];
+    load_tmc_identification_done_data: LoadTmcIdentificationFinalEvent["payload"];
   };
   meta?: object;
 };
@@ -30,19 +30,7 @@ enum StepDoneType {
   COMPUTE_STATS_DONE = "COMPUTE_STATS_DONE",
 }
 
-export default async function main(
-  initial_event: InitialEvent
-): Promise<DoneData> {
-  const {
-    payload: {
-      npmrds_export_transform_done_data: { npmrdsTravelTimesSqliteDb },
-      load_tmc_identifcation_done_data: {
-        table_schema: tmc_identification_imp_table_schema,
-        table_name: tmc_identification_imp_table_name,
-      },
-    },
-  } = initial_event;
-
+export default async function main(): Promise<DoneData> {
   const events = await dama_events.getAllEtlContextEvents();
 
   let final_event = events.find(({ type }) => type === ":FINAL");
@@ -50,6 +38,18 @@ export default async function main(
   if (final_event) {
     return final_event.payload;
   }
+
+  const [initial_event] = events;
+
+  const {
+    payload: {
+      npmrds_export_transform_done_data: { npmrdsTravelTimesSqliteDb },
+      load_tmc_identification_done_data: {
+        table_schema: tmc_identification_imp_table_schema,
+        table_name: tmc_identification_imp_table_name,
+      },
+    },
+  } = initial_event;
 
   let load_done_event = events.find(
     ({ type }) => type === StepDoneType.LOAD_DONE

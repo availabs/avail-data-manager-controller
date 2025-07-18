@@ -39,7 +39,7 @@ const pipelineAsync = promisify(pipeline);
 const npmrds_travel_times_imports_schema_name =
   NpmrdsDatabaseSchemas.NpmrdsTravelTimesImports;
 
-const columns = [
+const NPMRDS_TRAVEL_TIMES_COLUMNS = [
   "tmc",
   "date",
   "epoch",
@@ -180,7 +180,7 @@ function createDataIterator(sqlite_db: SQLiteDB) {
   return sqlite_db
     .prepare(
       `
-        SELECT ${columns}
+        SELECT ${NPMRDS_TRAVEL_TIMES_COLUMNS}
           FROM npmrds_travel_times
       `
     )
@@ -202,7 +202,7 @@ async function loadPostgresDbTable(sqlite_db: SQLiteDB) {
     await dama_db.query(clear_table);
 
     const copyFromSql = pgFormat(
-      `COPY %I.%I (${columns}) FROM STDIN WITH CSV`,
+      `COPY %I.%I (${NPMRDS_TRAVEL_TIMES_COLUMNS}) FROM STDIN WITH CSV`,
       npmrds_travel_times_imports_schema_name,
       table_name
     );

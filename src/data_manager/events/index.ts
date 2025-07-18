@@ -284,6 +284,7 @@ class DamaEvents extends DamaContextAttachedResource {
         SELECT
             event_id,
             etl_context_id,
+            parent_context_id,
             type,
             payload,
             meta,

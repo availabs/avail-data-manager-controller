@@ -47,6 +47,25 @@ export default class BaseTasksController extends DamaContextAttachedResource {
     this.queue_lock = new Lock();
   }
 
+  async shutDown() {
+    const pgenvs = Object.keys(this.pgboss_by_pgenv);
+
+    for (const pgenv of pgenvs) {
+      const pgbossPromise = this.pgboss_by_pgenv[pgenv];
+      if (pgbossPromise) {
+        try {
+          const pgboss = await pgbossPromise;
+          await pgboss.stop(); // Gracefully stop the PgBoss instance
+          logger.info(`PgBoss connection for ${pgenv} has been closed.`);
+        } catch (error) {
+          logger.error(
+            `Failed to close PgBoss connection for ${pgenv}: ${error.message}`
+          );
+        }
+      }
+    }
+  }
+
   //  By prefixing task queue names with the host_id,
   //    we ensure the tasks run ONLY on the machines where they were queued.
   //  This will prevent local dev laptops from picking up production jobs,

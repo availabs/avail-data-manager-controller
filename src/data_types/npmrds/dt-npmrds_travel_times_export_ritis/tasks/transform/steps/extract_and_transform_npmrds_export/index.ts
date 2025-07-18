@@ -34,7 +34,7 @@ import getEtlWorkDir from "var/getEtlWorkDir";
 
 // The mock main reuses the same NpmrdsTravelTimesExport dir.
 // The readonly files throw errors when we try to overwrite them.
-// This fuction will do a cleanup if the NODE_ENV === "development".
+// This function will do a cleanup if the NODE_ENV === "development".
 // FIXME: DOES NOT HANDLE CONCURRENT PROCESSING
 function cleanupReadOnlyFiles(npmrds_download_name: NpmrdsDownloadName) {
   // if (process.env.NODE_ENV?.toLowerCase() !== "development") {
@@ -102,45 +102,6 @@ const getExportDataSourcesPaths = (npmrds_download_name: NpmrdsDownloadName) =>
     format(v)
   );
 
-const getTmcIdentificationPathObj = (
-  npmrds_download_name: NpmrdsDownloadName
-) => {
-  const [, prefix, year, suffix] = npmrds_download_name.match(
-    /(^npmrdsx?_[a-z]{2})_from_(\d{4}).*(_v.*$)/
-  )!;
-
-  const meta = `${prefix}_${year}_${suffix}`;
-
-  const name = `TMC_Identification.${meta}`;
-  const ext = ".csv";
-  const base = `${name}${ext}`;
-
-  return { dir: getEtlWorkDir(), base, ext, name };
-};
-
-const getTmcIdentificationZipPathObj = (
-  npmrds_download_name: NpmrdsDownloadName
-) => {
-  const { dir, base } = getTmcIdentificationPathObj(npmrds_download_name);
-
-  return {
-    dir,
-    base: `${base}.zip`,
-    ext: ".zip",
-    name: base,
-  };
-};
-
-const getNpmrdsTravelTimesCsvPathObj = (
-  npmrds_download_name: NpmrdsDownloadName
-) => {
-  const ext = ".csv";
-  const name = npmrds_download_name;
-  const base = `${name}${ext}`;
-
-  return { dir: getEtlWorkDir(), base, ext, name };
-};
-
 const getDbPathObj = (npmrds_download_name: NpmrdsDownloadName) => ({
   dir: getEtlWorkDir(),
   base: `${npmrds_download_name}.sqlite3`,
@@ -174,75 +135,30 @@ function initializeDatabase(npmrds_download_name: NpmrdsDownloadName) {
   return sqlite_db_path;
 }
 
-function extractTmcIdentificationZipFile(
-  npmrds_download_name: NpmrdsDownloadName
-) {
-  const etl_work_dir = getEtlWorkDir();
+function loadTmcIdentification(npmrds_export_metadata: NpmrdsExportMetadata) {
+  const { name: npmrds_download_name, state } = npmrds_export_metadata;
 
-  const exportDataSourcePathObj = getExportDataSourcePathObj(
+  const all_vehicles_archive_path = getExportDataSourcesPath(
     npmrds_download_name,
     RitisExportNpmrdsDataSource.ALL_VEHICLES
   );
-
-  const exportDataSourcePath = format(exportDataSourcePathObj);
-
-  const tmcIdentFileBase = "TMC_Identification.csv";
-  const extractedTmcIdentPath = join(etl_work_dir, tmcIdentFileBase);
-
-  execSync(`
-    unzip -o \
-        '${exportDataSourcePath}' \
-        ${tmcIdentFileBase} \
-        -d ${etl_work_dir}
-  `);
-
-  const tmcIdentificationPathObj =
-    getTmcIdentificationPathObj(npmrds_download_name);
-
-  const tmcIdentificationPath = format(tmcIdentificationPathObj);
-
-  renameSync(extractedTmcIdentPath, tmcIdentificationPath);
-
-  makeFileReadOnlySync(tmcIdentificationPath);
-
-  const tmcIdentificationZipName = `${tmcIdentificationPathObj.base}.zip`;
-  const tmcIdentificationZipPath = join(etl_work_dir, tmcIdentificationZipName);
-
-  execSync(
-    `
-    zip \
-        -9 \
-        -m \
-        ${tmcIdentificationZipName} \
-        ${tmcIdentificationPathObj.base}
-  `,
-    { cwd: etl_work_dir, encoding: "utf8" }
-  );
-
-  makeFileReadOnlySync(tmcIdentificationZipPath);
-
-  return tmcIdentificationZipPath;
-}
-
-function loadTmcIdentification(npmrds_export_metadata: NpmrdsExportMetadata) {
-  const { name: npmrds_download_name, state } = npmrds_export_metadata;
 
   const sqlite_db_path = getDbPath(npmrds_download_name);
 
   console.log("loading TMC_Identification");
   console.time("loading TMC_Identification");
 
-  const tmcIdentificationZipPathObj =
-    getTmcIdentificationZipPathObj(npmrds_download_name);
-
-  const tmcIdentificationZipPath = format(tmcIdentificationZipPathObj);
-
-  execSync(`
-    unzip \
-        -p \
-        '${tmcIdentificationZipPath}' \
-      | sqlite3 -csv '${sqlite_db_path}' ".import '|cat -' tmc_identification"
-  `);
+  execSync(
+    dedent(`
+      set -o pipefail; \
+      unzip \
+          -p \
+          '${all_vehicles_archive_path}' \
+          TMC_Identification.csv \
+        | sqlite3 -csv '${sqlite_db_path}' ".import '|cat -' tmc_identification"
+    `),
+    { shell: "/bin/bash" }
+  );
 
   // Because the Canadian TMCs' state column is not the abbreviation.
   if (state === "qc") {
@@ -292,6 +208,7 @@ function loadNpmrdsTravelTimesData(npmrds_download_name: NpmrdsDownloadName) {
     const zipPath = getExportDataSourcesPath(npmrds_download_name, dataSource);
 
     const cmd = dedent(`
+      set -o pipefail; \
       unzip \
           -p \
           '${zipPath}' \
@@ -301,55 +218,17 @@ function loadNpmrdsTravelTimesData(npmrds_download_name: NpmrdsDownloadName) {
         | sqlite3 -csv '${sqlite_db_path}' ".import '|cat -' ${dataSource.toLowerCase()}"
     `);
 
-    execSync(cmd);
+    try {
+      execSync(cmd, { shell: "/bin/bash" });
+    } catch (error) {
+      logger.error(
+        `Failed to load data for ${dataSource}. Malformed ZIP archive or missing file: ${npmrds_download_name}.csv?`
+      );
+      throw error;
+    }
 
     console.timeEnd(`        ${dataSource}`);
   }
-}
-
-function createCsv(npmrds_download_name: NpmrdsDownloadName) {
-  const sqlite_db_path = getDbPath(npmrds_download_name);
-
-  const npmrdsTravelTimesCsvPathObj =
-    getNpmrdsTravelTimesCsvPathObj(npmrds_download_name);
-
-  const npmrdsTravelTimesCsvPath = format(npmrdsTravelTimesCsvPathObj);
-
-  const cmd = dedent(`
-    sqlite3 \
-      -header \
-      -csv \
-      ${sqlite_db_path} \
-      '
-        SELECT
-            tmc,
-            date,
-            epoch,
-            travel_time_all_vehicles,
-            travel_time_passenger_vehicles,
-            travel_time_freight_trucks,
-            data_density_all_vehicles,
-            data_density_passenger_vehicles,
-            data_density_freight_trucks
-          FROM npmrds_travel_times
-          ORDER BY tmc, date, epoch
-      ' \
-      > ${npmrdsTravelTimesCsvPath}
-  `);
-
-  execSync(cmd);
-
-  makeFileReadOnlySync(npmrdsTravelTimesCsvPath);
-
-  const { dir, base } = npmrdsTravelTimesCsvPathObj;
-  const zipFileName = `${base}.zip`;
-
-  execSync(`zip -m ${zipFileName} ${base}`, { cwd: dir });
-
-  const zipFilePath = join(dir, zipFileName);
-  makeFileReadOnlySync(zipFilePath);
-
-  return zipFilePath;
 }
 
 function loadMetadataTable(npmrds_export_metadata: NpmrdsExportMetadata) {
@@ -404,7 +283,8 @@ function loadMetadataTable(npmrds_export_metadata: NpmrdsExportMetadata) {
         ${+is_complete_month},
         ${+is_complete_week},
         '${timestamp}'
-      ) ;
+      )
+    ;
   `;
 
   const { error, stderr } = spawnSync("sqlite3", [sqlite_db_path, sql], {
@@ -461,19 +341,6 @@ function finalizeDatabase(npmrds_download_name: NpmrdsDownloadName) {
   makeFileReadOnlySync(sqlite_db_path);
 }
 
-function zipDatabase(npmrds_download_name: NpmrdsDownloadName) {
-  const { dir, base } = getDbPathObj(npmrds_download_name);
-  const zipName = `${base}.zip`;
-  const zipPath = join(dir, zipName);
-
-  // We don't remove the original SQLiteDB because we need it later to load the NpmrdsTravelTimesDb table.
-  execSync(`zip ${zipName} ${base}`, { cwd: dir });
-
-  makeFileReadOnlySync(zipPath);
-
-  return zipPath;
-}
-
 export type TaskParams = NpmrdsExportDownloadMeta & {
   npmrds_export_request: NpmrdsExportRequest;
 };
@@ -486,10 +353,6 @@ export default async function main(): Promise<NpmrdsExportTransformOutput> {
   cleanupReadOnlyFiles(npmrds_download_name);
 
   const npmrdsTravelTimesSqliteDb = initializeDatabase(npmrds_download_name);
-
-  // npmrdsTmcIdentificationCsv is actually the npmrdsTmcIdentificationCsvZip path
-  const npmrdsTmcIdentificationCsv =
-    extractTmcIdentificationZipFile(npmrds_download_name);
 
   const {
     npmrdsAllVehiclesTravelTimesExport,
@@ -505,10 +368,6 @@ export default async function main(): Promise<NpmrdsExportTransformOutput> {
 
   finalizeDatabase(npmrds_download_name);
 
-  const npmrdsTravelTimesCsv = createCsv(npmrds_download_name);
-
-  const npmrdsTravelTimesExportSqlite = zipDatabase(npmrds_download_name);
-
   // NOTE: Naming conventions based on DamaSourceNames for the respective files.
 
   // FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME FIXME
@@ -523,9 +382,5 @@ export default async function main(): Promise<NpmrdsExportTransformOutput> {
     npmrdsFreightTrucksTravelTimesExport,
 
     npmrdsTravelTimesSqliteDb,
-
-    npmrdsTravelTimesExportSqlite,
-    npmrdsTmcIdentificationCsv,
-    npmrdsTravelTimesCsv,
   };
 }

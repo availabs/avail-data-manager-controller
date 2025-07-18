@@ -1,100 +1,99 @@
 import { join } from "path";
 
+import dama_db from "data_manager/dama_db";
 import dama_events, { EtlEvent, DamaEvent } from "data_manager/events";
 
 import {
   getEtlContextId,
-  getEtlWorkDir,
   verifyIsInTaskEtlContext,
 } from "data_manager/contexts";
+
+import getEtlWorkDir from "var/getEtlWorkDir";
+
 import BaseTasksController from "data_manager/tasks/BaseTasksController";
 import { DamaTaskDescriptor } from "data_manager/tasks/domain";
 
-import {
-  TaskQueue,
-  NpmrdsExportRequest,
-  NpmrdsExportTransformOutput,
-} from "../domain";
-
-import {
-  InitialEvent as DownloadInitialEvent,
-  FinalEvent as DownloadFinalEvent,
-} from "./tasks/download";
+import { TaskQueue, NpmrdsExportTransformOutput } from "../domain";
+import { PipelineInitialEvent, IngestInitialEvent } from "./domain";
 
 import { FinalEvent as TransformFinalEvent } from "./tasks/transform";
 
-const download_worker_path = join(__dirname, "./tasks/download/worker.ts");
+// Paths to the new task workers
+const ingest_worker_path = join(
+  __dirname,
+  "./tasks/ingest_from_uuids/worker.ts"
+);
 const transform_worker_path = join(__dirname, "./tasks/transform/worker.ts");
 
 export type DoneData = NpmrdsExportTransformOutput;
 
-export type InitialEvent = DownloadInitialEvent;
 export type FinalEvent = {
   type: ":FINAL";
   payload: DoneData;
 };
 
 enum SubtaskEventType {
-  REQUEST_AND_DOWNLOAD_QUEUED = "REQUEST_AND_DOWNLOAD_QUEUED",
+  INGEST_QUEUED = "INGEST_QUEUED",
   TRANSFORM_QUEUED = "TRANSFORM_QUEUED",
 }
 
-async function download(
-  npmrds_export_request: NpmrdsExportRequest,
-  events: DamaEvent[],
-  task_controller: BaseTasksController
-) {
-  let request_and_download_queued_event: EtlEvent | undefined = events.find(
-    ({ type }) => type === SubtaskEventType.REQUEST_AND_DOWNLOAD_QUEUED
+async function _ingest(task_controller: BaseTasksController) {
+  const events = await dama_events.getAllEtlContextEvents();
+
+  let ingest_queued_event: EtlEvent | undefined = events.find(
+    ({ type }) => type === SubtaskEventType.INGEST_QUEUED
   );
 
-  if (!request_and_download_queued_event) {
-    const request_and_download_initial_event = {
+  if (!ingest_queued_event) {
+    const {
+      payload: { ritis_uuids },
+    } = <PipelineInitialEvent>events[0];
+
+    const ingest_initial_event: IngestInitialEvent = {
       type: ":INITIAL",
-      payload: npmrds_export_request,
-      meta: { note: "request and download export" },
+      payload: { ritis_uuids },
+      meta: { note: "ingest npmrds export from RITIS uuids" },
     };
 
-    const download_task_desc: DamaTaskDescriptor = {
-      worker_path: download_worker_path,
-      dama_task_queue_name: TaskQueue.DOWNLOAD_EXPORT,
+    const ingest_task_desc: DamaTaskDescriptor = {
+      worker_path: ingest_worker_path,
+      dama_task_queue_name: TaskQueue.DOWNLOAD_EXPORT, // We can reuse the same queue
       parent_context_id: getEtlContextId(),
-      initial_event: request_and_download_initial_event,
+      initial_event: ingest_initial_event,
+      // NOTE: The etl_work_dir will be set the Root ETL Context's, which is the Ingest's ParentContext.
+      //       This allows the Transform Subtask to use the same etl_work_dir.
       etl_work_dir: getEtlWorkDir(),
     };
 
-    const { etl_context_id: download_eci } =
-      await task_controller.queueDamaTask(download_task_desc, {
-        retryLimit: 0, // Because we don't want to make duplicate requests. TODO: implement a way to check.
-        expireInHours: 24 * 7, // Because it may be deep in a queue.
-      });
+    const { etl_context_id: ingest_eci } = await task_controller.queueDamaTask(
+      ingest_task_desc,
+      {
+        retryLimit: 0,
+        expireInHours: 1,
+      }
+    );
 
-    request_and_download_queued_event = {
-      type: SubtaskEventType.REQUEST_AND_DOWNLOAD_QUEUED,
+    ingest_queued_event = {
+      type: SubtaskEventType.INGEST_QUEUED,
       payload: {
-        etl_context_id: download_eci,
+        etl_context_id: ingest_eci,
       },
     };
 
-    await dama_events.dispatch(request_and_download_queued_event);
+    await dama_events.dispatch(ingest_queued_event);
   }
 
   const {
-    payload: { etl_context_id: download_eci },
-  } = <DamaEvent>request_and_download_queued_event;
+    payload: { etl_context_id: ingest_eci },
+  } = <DamaEvent>ingest_queued_event;
 
-  const download_final_event = <DownloadFinalEvent>(
-    await dama_events.getEventualEtlContextFinalEvent(download_eci)
-  );
-
-  return download_final_event.payload;
+  // We wait for the final event of the ingest task to ensure it's complete.
+  await dama_events.getEventualEtlContextFinalEvent(ingest_eci);
 }
 
-async function transform(
-  download_done_data: DownloadFinalEvent["payload"],
-  events: DamaEvent[],
-  task_controller: BaseTasksController
-) {
+async function _transform(task_controller: BaseTasksController) {
+  const events = await dama_events.getAllEtlContextEvents();
+
   let transform_queued_event: EtlEvent | undefined = events.find(
     ({ type }) => type === SubtaskEventType.TRANSFORM_QUEUED
   );
@@ -102,7 +101,7 @@ async function transform(
   if (!transform_queued_event) {
     const transform_initial_event = {
       type: ":INITIAL",
-      payload: download_done_data,
+      payload: null, // The transform task now gets its metadata from the context
       meta: { note: "transform download" },
     };
 
@@ -111,6 +110,8 @@ async function transform(
       dama_task_queue_name: TaskQueue.TRANSFORM_EXPORT,
       parent_context_id: getEtlContextId(),
       initial_event: transform_initial_event,
+      // NOTE: The etl_work_dir will be set the Root ETL Context's, which is the Ingest's ParentContext.
+      //       This allows the Transform Subtask to use the same etl_work_dir.
       etl_work_dir: getEtlWorkDir(),
     };
 
@@ -143,9 +144,7 @@ async function transform(
   return transform_final_event.payload;
 }
 
-export default async function main(
-  initial_event: InitialEvent
-): Promise<DoneData> {
+export default async function main(): Promise<DoneData> {
   verifyIsInTaskEtlContext();
 
   const events = await dama_events.getAllEtlContextEvents();
@@ -156,21 +155,14 @@ export default async function main(
     return final_event.payload;
   }
 
+  // I don't recall why this is here, rather than atop the file.
+  // I think it has to do with not firing up the controller whenever this file is imported.
   const task_controller = new BaseTasksController();
 
-  const { payload: npmrds_export_request } = initial_event;
+  // SERIAL: Ingest must finish before Transform is queued.
+  await _ingest(task_controller);
 
-  const download_done_data = await download(
-    npmrds_export_request,
-    events,
-    task_controller
-  );
-
-  const transform_done_data = await transform(
-    download_done_data,
-    events,
-    task_controller
-  );
+  const transform_done_data = await _transform(task_controller);
 
   final_event = {
     type: ":FINAL",
