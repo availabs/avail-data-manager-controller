@@ -32,26 +32,6 @@ interface IMetadata {
 const NPMRDS_NAME_RE =
   /^(npmrdsx?)_([a-z]{2})_from_(\d{8})_to_(\d{8})_v(\d{8}T?\d{4,6})$/;
 
-async function processZipFile(
-  zipFilePath: string,
-  onFile: (fileName: string, fileStream: Entry) => Promise<void>
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    createReadStream(zipFilePath)
-      .pipe(unzipper.Parse())
-      .on("entry", async (entry: Entry) => {
-        try {
-          await onFile(entry.path, entry);
-          entry.autodrain(); // Ensure unused streams are drained
-        } catch (err) {
-          reject(err);
-        }
-      })
-      .on("close", resolve)
-      .on("error", reject);
-  });
-}
-
 function getDataSourceFromContents(contents: string): string {
   if (contents.includes("(Trucks and passenger vehicles)")) {
     return "all_vehicles";
@@ -80,26 +60,23 @@ export async function _processFile(
   let contentsTxt = "";
   let dataCsvFileName = "";
 
-  await processZipFile(
-    zipFilePath,
-    async (fileName: string, fileStream: Entry) => {
-      if (fileName.endsWith("Contents.txt")) {
-        const chunks: Buffer[] = [];
-
-        for await (const chunk of fileStream) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        }
-
-        contentsTxt = Buffer.concat(chunks).toString("utf-8");
-      } else {
-        if (fileName.match(/^npmrds.*\.csv$/)) {
-          dataCsvFileName = fileName;
-        }
-
-        fileStream.autodrain();
-      }
-    }
+  const zip = createReadStream(zipFilePath).pipe(
+    unzipper.Parse({ forceStream: true })
   );
+
+  for await (const entry of zip) {
+    const fileName = entry.path;
+
+    if (fileName === "Contents.txt") {
+      contentsTxt = (await entry.buffer()).toString("utf-8");
+    } else {
+      if (fileName.match(/^npmrds.*\.csv$/)) {
+        dataCsvFileName = fileName;
+      }
+
+      entry.autodrain();
+    }
+  }
 
   if (!contentsTxt || !dataCsvFileName) {
     throw new Error(`Archive ${file} is missing required files.`);
