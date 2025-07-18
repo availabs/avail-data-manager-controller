@@ -1,6 +1,6 @@
 import { readdirSync, createReadStream, writeFileSync } from "fs";
 import { join } from "path";
-import unzipper from "unzipper";
+import unzipper, { Entry } from "unzipper";
 
 import dama_events from "data_manager/events";
 import logger from "data_manager/logger";
@@ -34,12 +34,12 @@ const NPMRDS_NAME_RE =
 
 async function processZipFile(
   zipFilePath: string,
-  onFile: (fileName: string, fileStream: NodeJS.ReadableStream) => Promise<void>
+  onFile: (fileName: string, fileStream: Entry) => Promise<void>
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     createReadStream(zipFilePath)
       .pipe(unzipper.Parse())
-      .on("entry", async (entry) => {
+      .on("entry", async (entry: Entry) => {
         try {
           await onFile(entry.path, entry);
           entry.autodrain(); // Ensure unused streams are drained
@@ -80,19 +80,26 @@ export async function _processFile(
   let contentsTxt = "";
   let dataCsvFileName = "";
 
-  await processZipFile(zipFilePath, async (fileName, fileStream) => {
-    if (fileName.endsWith("Contents.txt")) {
-      const chunks: Buffer[] = [];
+  await processZipFile(
+    zipFilePath,
+    async (fileName: string, fileStream: Entry) => {
+      if (fileName.endsWith("Contents.txt")) {
+        const chunks: Buffer[] = [];
 
-      for await (const chunk of fileStream) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        for await (const chunk of fileStream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+
+        contentsTxt = Buffer.concat(chunks).toString("utf-8");
+      } else {
+        if (fileName.match(/^npmrds.*\.csv$/)) {
+          dataCsvFileName = fileName;
+        }
+
+        fileStream.autodrain();
       }
-
-      contentsTxt = Buffer.concat(chunks).toString("utf-8");
-    } else if (fileName.match(/^npmrds.*\.csv$/)) {
-      dataCsvFileName = fileName;
     }
-  });
+  );
 
   if (!contentsTxt || !dataCsvFileName) {
     throw new Error(`Archive ${file} is missing required files.`);
