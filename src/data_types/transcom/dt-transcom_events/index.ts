@@ -292,14 +292,22 @@ async function getStartTimestamp(): Promise<string> {
   return "2016-01-01T00:00:00";
 }
 
-export default async function main(initial_event: InitialEvent) {
+export default async function main() {
   verifyIsInTaskEtlContext();
 
+  const events = await dama_events.getAllEtlContextEvents();
+
+  let final_event = events.find(({ type }) => type === ":FINAL");
+
+  if (final_event) {
+    return final_event.payload;
+  }
+
+  const [initial_event] = events;
+  const initial_event_payload = initial_event.payload || {};
+  let { start_timestamp = null, end_timestamp = null } = initial_event_payload;
+
   logger.debug(`starting ${new Date().toISOString()}`);
-
-  const payload = initial_event.payload || {};
-
-  let { start_timestamp, end_timestamp } = payload;
 
   // The nightly ETL does not specify either start_timestamp or end_timestamp.
   //   Instead it resumes from the latest event in the db.
@@ -352,8 +360,12 @@ export default async function main(initial_event: InitialEvent) {
     logger.debug(`finished subtask ${subtask.name}`);
   }
 
-  return {
+  final_event = {
     type: ":FINAL",
     payload: { etl_work_dir: getEtlWorkDir() },
   };
+
+  await dama_events.dispatch(final_event);
+
+  return final_event.payload;
 }
